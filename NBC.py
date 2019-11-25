@@ -21,6 +21,7 @@ class NaiveBayesClassifier:
         self.post_probs = [] # 카테고리별 사전확률
         self.cat_likelihoods = [] # 카테고리별 우도 (어간,우도) 배열
         self.smoothing_num = 0.5 # 평활화 상수
+        self.sum_cat_prob = [] # 카테고리별 어간 수
 
         self.test_text_names = [] # 테스트데이터 텍스트파일 이름 배열
         self.test_texts = [] # 테스트데이터 텍스트파일별 원문
@@ -119,13 +120,17 @@ class NaiveBayesClassifier:
         sum_cat_prob = 0
         # 카테고리별로 우도 계산
         for stem_counts in self.cat_stems_count:
-            sum_cat_prob = len(stem_counts)
-            # 임시로 사용하는 각 카테고리의 카운트 목록의 값을 우도로 대체
-            for stem_count in stem_counts:
-                # 우도 저장시 평활화
-                stem_counts[stem_count] = (stem_counts[stem_count] + self.smoothing_num) / (sum_cat_prob + (2 * self.smoothing_num))
-            # 카테고리별 우도 저장
-            self.cat_likelihoods.append(stem_counts)
+            # 해당 카테고리의 전체 단어 개수 세기
+            sum_cat_prob = 0
+            temp = {}
+            for index, (key, value) in enumerate(stem_counts.items()):
+                sum_cat_prob += value
+            self.sum_cat_prob.append(sum_cat_prob)
+            # 해당 카테고리의 단어순으로 반복
+            for index, (key, value) in enumerate(stem_counts.items()):
+                # 평활화 상수를 각각 더해 0이 되는것을 방지함
+                temp[key] = value + self.smoothing_num / sum_cat_prob + (self.smoothing_num * 2)
+            self.cat_likelihoods.append(temp)
 
     """트레이닝 데이터 입력부터 우도 계산까지 일괄처리"""
     def train_data(self):
@@ -134,7 +139,6 @@ class NaiveBayesClassifier:
         self.count_stems()
         self.calc_post_probs()
         self.calc_likelihoods()
-        print(self.cat_likelihoods)
 
     """테스트 데이터 입력"""
     def load_test_data(self):
@@ -152,9 +156,8 @@ class NaiveBayesClassifier:
         # 각 원문에 대해 아래 작업
         for test_text in self.test_texts:
              self.test_stems.append(self.tokenize_stems(test_text))
-        print(self.cat_stems_count[0]['billion'])
 
-    """우도를 기준으로 사후확률을 계산하여 어느 카테고리인지 분류"""
+    """우도를 기준으로 사후확률을 계산하여 어느 카테고리인지 분류한 후 결과 출력"""
     def classify_test_data(self):
         # 테스트데이터 파일별로 반복함
         for (test_index, test_stem) in enumerate(self.test_stems):
@@ -163,24 +166,32 @@ class NaiveBayesClassifier:
             for (dev_index, post_prob) in enumerate(self.post_probs):
                 # 해당 테스트데이터 파일이 해당 카테고리에 속할 사후확률
                 category_prob = 1
-                category_negative = 1
+                category_negative = 0
                 # 테스트데이터 어간별로 반복함
                 for test_each_stem in test_stem:
                     # 테스트데이터에서 가져온 어간이 현재 카테고리의 어간 목록에 있을 경우
                     if test_each_stem in self.cat_stems[dev_index]:
                         # 해당하는 우도를 누적하여 곱한다
                         category_prob *= self.cat_likelihoods[dev_index][test_each_stem]
+                    else:
+                        # 해당하지 않는 경우, 부정 확률 ( 0 / 카테고리 전체 어간 수 ), 평활화 적용
+                        category_prob *= self.smoothing_num / self.sum_cat_prob[dev_index] + (self.smoothing_num * 2)
                 # 우도 누적이 끝나면, 사전확률 * 우도 누적곱으로 확률 계산
                 result_probs[self.categories[dev_index]] = post_prob * category_prob
             # 결과 출력
-            print('* ' + self.test_text_names[test_index] + ' 파일에 대한 결과 : ')
-            print(sorted(result_probs.items(), key=operator.itemgetter(1), reverse=True))
+            print( '*' + self.test_text_names[test_index] + ' 파일에 대한 결과 ')
+            result = sorted(result_probs.items(), key=operator.itemgetter(1), reverse=True)
+            for index, (key, value) in enumerate(result):
+                print('[',key,']', value, end='')
+            print('\n')
 
-
+    """테스트 데이터 분류 일괄처리"""
+    def classify(self):
+        self.load_test_data()
+        self.test_tokenize_stem()
+        self.classify_test_data()
 
 NBC = NaiveBayesClassifier()
 NBC.set_dir("./dev/", "./test/")
 NBC.train_data()
-NBC.load_test_data()
-NBC.test_tokenize_stem()
-NBC.classify_test_data()
+NBC.classify()
